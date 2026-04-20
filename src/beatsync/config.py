@@ -8,6 +8,7 @@ from enum import StrEnum
 from pathlib import Path
 
 from beatsync.planner import CutTrigger
+from beatsync.renderer import default_resolution_for, parse_aspect_ratio
 
 
 class Mode(StrEnum):
@@ -150,6 +151,7 @@ def _validate(config: Config) -> None:
         )
     if config.bpm_override < 0:
         raise ValueError(f"bpm_override must be >= 0, got {config.bpm_override}")
+    parse_aspect_ratio(config.aspect_ratio)
     for i, source in enumerate(config.sources):
         if not source.exists():
             raise FileNotFoundError(f"sources[{i}] file does not exist: {source}")
@@ -186,6 +188,9 @@ def load_config(path: Path) -> Config:
     sources = tuple(Path(s) for s in sources_raw)
     weights = _normalize_weights(data.get("source_weights"), len(sources))
 
+    aspect_ratio = str(data.get("aspect_ratio", "9:16"))
+    output_resolution = str(data.get("output_resolution", default_resolution_for(aspect_ratio)))
+
     config = Config(
         config_name=data["config_name"],
         config_version=data["config_version"],
@@ -210,8 +215,8 @@ def load_config(path: Path) -> Config:
         avoid_clip_repeat=bool(data.get("avoid_clip_repeat", True)),
         long_clip_sampling_strategy=str(data.get("long_clip_sampling_strategy", "distributed")),
         ffmpeg_filter=str(data.get("ffmpeg_filter", "")),
-        aspect_ratio=str(data.get("aspect_ratio", "9:16")),
-        output_resolution=str(data.get("output_resolution", "1080x1920")),
+        aspect_ratio=aspect_ratio,
+        output_resolution=output_resolution,
         output_frame_rate=int(data.get("output_frame_rate", 30)),
         output_bitrate=str(data.get("output_bitrate", "8M")),
         render_quality_tier=str(data.get("render_quality_tier", "draft")),

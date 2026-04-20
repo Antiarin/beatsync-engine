@@ -128,6 +128,7 @@ def main(argv: list[str] | None = None) -> int:
             audio_path=config.audio,
             ffmpeg_filter=config.ffmpeg_filter,
             output_resolution=config.output_resolution,
+            aspect_ratio=config.aspect_ratio,
             frame_rate=config.output_frame_rate,
             bitrate=config.output_bitrate,
             audio_fade_in_s=config.audio_fade_in_duration,

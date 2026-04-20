@@ -4,24 +4,73 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from beatsync.renderer import (
     build_extract_command,
     build_filter_chain,
     build_final_mux_command,
+    default_resolution_for,
     format_output_filename,
+    parse_aspect_ratio,
 )
 from beatsync.sampler import Clip
 
 
-def test_build_filter_chain_includes_crop_scale_and_user_filter() -> None:
+def test_build_filter_chain_9_16_crop_scale_and_user_filter() -> None:
     chain = build_filter_chain(
         user_filter="eq=saturation=0.88",
         output_resolution="1080x1920",
+        aspect_ratio="9:16",
     )
-    assert chain.startswith("crop=ih*9/16:ih,")
+    assert "crop=min(iw\\,ih*9/16):min(ih\\,iw*16/9)" in chain
     assert "scale=1080:1920" in chain
     assert chain.endswith("eq=saturation=0.88")
     assert chain.index("crop") < chain.index("scale") < chain.index("eq=")
+
+
+def test_build_filter_chain_16_9_landscape() -> None:
+    chain = build_filter_chain(user_filter="", output_resolution="1920x1080", aspect_ratio="16:9")
+    assert "crop=min(iw\\,ih*16/9):min(ih\\,iw*9/16)" in chain
+    assert "scale=1920:1080" in chain
+
+
+def test_build_filter_chain_square() -> None:
+    chain = build_filter_chain(user_filter="", output_resolution="1080x1080", aspect_ratio="1:1")
+    assert "crop=min(iw\\,ih*1/1):min(ih\\,iw*1/1)" in chain
+
+
+def test_build_filter_chain_omits_trailing_comma_for_empty_filter() -> None:
+    chain = build_filter_chain(user_filter="", output_resolution="1080x1920", aspect_ratio="9:16")
+    assert not chain.endswith(",")
+
+
+@pytest.mark.parametrize(
+    "aspect,expected",
+    [
+        ("9:16", "1080x1920"),
+        ("16:9", "1920x1080"),
+        ("1:1", "1080x1080"),
+        ("4:5", "1080x1350"),
+        ("4:3", "1440x1080"),
+    ],
+)
+def test_default_resolution_for_known_aspects(aspect: str, expected: str) -> None:
+    assert default_resolution_for(aspect) == expected
+
+
+def test_default_resolution_for_unknown_aspect_derives_sensibly() -> None:
+    res = default_resolution_for("21:9")
+    assert res == "2560x1080"
+
+
+def test_parse_aspect_ratio_rejects_bad_input() -> None:
+    with pytest.raises(ValueError, match="W:H"):
+        parse_aspect_ratio("9x16")
+    with pytest.raises(ValueError, match="integers"):
+        parse_aspect_ratio("a:b")
+    with pytest.raises(ValueError, match="positive"):
+        parse_aspect_ratio("0:16")
 
 
 def test_build_extract_command_uses_input_seek_with_timestamp_fix() -> None:

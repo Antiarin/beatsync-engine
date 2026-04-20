@@ -16,7 +16,7 @@ Works for music videos, reels, shorts, sports highlights, or any use case where 
 - **Distributed clip sampling** that spreads picks across the full duration of each source
 - **Brightness gate** with auto-resample for dark frames
 - **FFmpeg filter chain** passed through as a config value, no hardcoded grade
-- **9:16 output** with center crop from 16:9 sources, configurable resolution and bitrate
+- **Any aspect ratio** (9:16, 16:9, 1:1, 4:5, 4:3, 21:9, or any custom `W:H`) with smart source-agnostic crop. Output resolution auto-defaults per aspect
 - **Dockerfile** included for zero-setup runs
 
 ## Modes

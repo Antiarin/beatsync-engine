@@ -11,13 +11,58 @@ from pathlib import Path
 from beatsync.ffprobe import get_duration_seconds
 from beatsync.sampler import Clip, ClipAssignment
 
+DEFAULT_RESOLUTIONS: dict[tuple[int, int], str] = {
+    (9, 16): "1080x1920",
+    (16, 9): "1920x1080",
+    (1, 1): "1080x1080",
+    (4, 5): "1080x1350",
+    (5, 4): "1350x1080",
+    (4, 3): "1440x1080",
+    (3, 4): "1080x1440",
+    (2, 3): "1080x1620",
+    (3, 2): "1620x1080",
+    (21, 9): "2560x1080",
+}
 
-def build_filter_chain(user_filter: str, output_resolution: str) -> str:
-    """Compose the full video filter chain: crop -> scale -> user filter."""
-    width, height = output_resolution.split("x")
-    crop = "crop=ih*9/16:ih"
-    scale = f"scale={width}:{height}"
-    return f"{crop},{scale},{user_filter}"
+
+def parse_aspect_ratio(aspect: str) -> tuple[int, int]:
+    """Parse a 'W:H' aspect string into a (width, height) tuple of positive ints."""
+    parts = aspect.split(":")
+    if len(parts) != 2:
+        raise ValueError(f"aspect_ratio must be in 'W:H' form, got '{aspect}'")
+    try:
+        w, h = int(parts[0]), int(parts[1])
+    except ValueError as exc:
+        raise ValueError(f"aspect_ratio parts must be integers, got '{aspect}'") from exc
+    if w <= 0 or h <= 0:
+        raise ValueError(f"aspect_ratio parts must be positive, got '{aspect}'")
+    return w, h
+
+
+def default_resolution_for(aspect: str) -> str:
+    """Return a sensible default output resolution for a given aspect ratio."""
+    w, h = parse_aspect_ratio(aspect)
+    if (w, h) in DEFAULT_RESOLUTIONS:
+        return DEFAULT_RESOLUTIONS[(w, h)]
+    base = 1080
+    if w >= h:
+        return f"{base * w // h}x{base}"
+    return f"{base}x{base * h // w}"
+
+
+def build_filter_chain(user_filter: str, output_resolution: str, aspect_ratio: str) -> str:
+    """Compose the full video filter chain: crop -> scale -> user filter.
+
+    Crops the source to match aspect_ratio regardless of source orientation,
+    then scales to output_resolution. Uses min() in the crop expression so
+    the same filter works whether the source is portrait, landscape, or square.
+    """
+    w, h = parse_aspect_ratio(aspect_ratio)
+    out_w, out_h = output_resolution.split("x")
+    crop = f"crop=min(iw\\,ih*{w}/{h}):min(ih\\,iw*{h}/{w})"
+    scale = f"scale={out_w}:{out_h}"
+    tail = f",{user_filter}" if user_filter else ""
+    return f"{crop},{scale}{tail}"
 
 
 def build_extract_command(
@@ -185,6 +230,7 @@ def render(
     audio_path: Path,
     ffmpeg_filter: str,
     output_resolution: str,
+    aspect_ratio: str,
     frame_rate: int,
     bitrate: str,
     audio_fade_in_s: float,
@@ -198,7 +244,7 @@ def render(
     """Execute the full render pipeline: extract each clip, concat, mux."""
     rng = random.Random()
     temp_dir.mkdir(parents=True, exist_ok=True)
-    filter_chain = build_filter_chain(ffmpeg_filter, output_resolution)
+    filter_chain = build_filter_chain(ffmpeg_filter, output_resolution, aspect_ratio)
     clip_paths: list[Path] = []
     for clip in assignment.clips:
         clip_path = temp_dir / f"clip_{clip.output_index:04d}.mp4"
