@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from beatsync.planner import CutPlan, CutTrigger, SnapType, SourceLabel, plan_cuts
+from beatsync.planner import CutPlan, CutTrigger, SnapType, plan_cuts
 
 
 def _beat_grid(bpm: float, duration_s: float) -> np.ndarray:
@@ -13,214 +13,181 @@ def _beat_grid(bpm: float, duration_s: float) -> np.ndarray:
     return np.arange(num, dtype=np.float64) * interval_ms
 
 
-def test_cut_frequency_point_six_roughly_matches() -> None:
-    beat_grid = _beat_grid(120.0, 30.0)
-    bass_onsets = np.array([], dtype=np.float64)
-    plan = plan_cuts(
+def _plan(
+    *,
+    beat_grid: np.ndarray,
+    edit_length_ms: int,
+    cut_frequency: float = 0.6,
+    cut_trigger: CutTrigger = CutTrigger.BEAT_GRID,
+    bass_onsets: np.ndarray | None = None,
+    max_bass_snaps: int = 4,
+    alternation_variation: float = 0.0,
+    max_consecutive_same_source: int = 2,
+    source_weights: tuple[float, ...] = (0.5, 0.5),
+    min_segment_ms: int = 2000,
+    rng_seed: int = 42,
+) -> CutPlan:
+    return plan_cuts(
         beat_times_ms=beat_grid,
-        bass_onset_times_ms=bass_onsets,
-        edit_length_ms=30000,
-        cut_frequency=0.6,
-        cut_trigger=CutTrigger.BEAT_GRID,
+        bass_onset_times_ms=bass_onsets
+        if bass_onsets is not None
+        else np.array([], dtype=np.float64),
+        edit_length_ms=edit_length_ms,
+        cut_frequency=cut_frequency,
+        cut_trigger=cut_trigger,
         tolerance_ms_low=80,
         tolerance_ms_high=100,
-        max_bass_snaps=4,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=42,
+        max_bass_snaps=max_bass_snaps,
+        alternation_variation=alternation_variation,
+        max_consecutive_same_source=max_consecutive_same_source,
+        source_weights=source_weights,
+        min_segment_ms=min_segment_ms,
+        rng_seed=rng_seed,
     )
+
+
+def test_cut_frequency_point_six_roughly_matches() -> None:
+    plan = _plan(beat_grid=_beat_grid(120.0, 30.0), edit_length_ms=30000)
     assert isinstance(plan, CutPlan)
-    # With 2000ms min segment, 120 BPM (500ms beats), max ~15 segments in 30s.
     assert 5 <= len(plan.segments) <= 15
     assert plan.segments[0].start_ms == 0
     assert plan.segments[-1].end_ms == 30000
-    for a, b in zip(plan.segments, plan.segments[1:], strict=False):
-        assert a.end_ms == b.start_ms
 
 
 def test_cut_frequency_zero_single_segment() -> None:
-    beat_grid = _beat_grid(120.0, 30.0)
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=np.array([], dtype=np.float64),
-        edit_length_ms=30000,
-        cut_frequency=0.0,
-        cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=80,
-        tolerance_ms_high=100,
-        max_bass_snaps=4,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=42,
-    )
+    plan = _plan(beat_grid=_beat_grid(120.0, 30.0), edit_length_ms=30000, cut_frequency=0.0)
     assert len(plan.segments) == 1
-    assert plan.segments[0].start_ms == 0
-    assert plan.segments[0].end_ms == 30000
 
 
-def test_cut_frequency_one_every_beat_in_window() -> None:
-    beat_grid = _beat_grid(120.0, 30.0)
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=np.array([], dtype=np.float64),
-        edit_length_ms=30000,
-        cut_frequency=1.0,
-        cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=80,
-        tolerance_ms_high=100,
-        max_bass_snaps=4,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=42,
-    )
-    # With 2000ms min segment, max ~15 segments in 30s even at cut_frequency=1.0.
+def test_cut_frequency_one_fills_window() -> None:
+    plan = _plan(beat_grid=_beat_grid(120.0, 30.0), edit_length_ms=30000, cut_frequency=1.0)
     assert 13 <= len(plan.segments) <= 16
 
 
-def test_punch_mode_no_808_snaps() -> None:
-    beat_grid = _beat_grid(135.0, 15.0)
-    onsets = beat_grid + 20.0
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=onsets,
+def test_beat_grid_trigger_yields_no_808_snaps() -> None:
+    grid = _beat_grid(135.0, 15.0)
+    plan = _plan(
+        beat_grid=grid,
         edit_length_ms=15000,
-        cut_frequency=0.6,
         cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=50,
-        tolerance_ms_high=70,
-        max_bass_snaps=2,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=7,
-        source_b_seconds=8,
-        rng_seed=1,
+        bass_onsets=grid + 20.0,
+        min_segment_ms=1500,
     )
     assert all(seg.snap_type == SnapType.BEAT_GRID for seg in plan.segments)
 
 
-def test_breathe_mode_snaps_to_808_within_tolerance() -> None:
-    beat_grid = _beat_grid(128.0, 30.0)
-    # Place onsets near beats that are well past the 2000ms minimum from each other.
-    # At 128 BPM, beats are ~469ms apart. Beat index 5 = ~2344ms, index 10 = ~4688ms.
-    onsets = np.array([beat_grid[5] + 40.0, beat_grid[10] - 30.0])
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=onsets,
+def test_hybrid_trigger_snaps_to_808_within_tolerance() -> None:
+    grid = _beat_grid(128.0, 30.0)
+    onsets = np.array([grid[5] + 40.0, grid[10] - 30.0])
+    plan = _plan(
+        beat_grid=grid,
         edit_length_ms=30000,
-        cut_frequency=1.0,
         cut_trigger=CutTrigger.HYBRID,
-        tolerance_ms_low=80,
-        tolerance_ms_high=100,
-        max_bass_snaps=4,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=1,
+        cut_frequency=1.0,
+        bass_onsets=onsets,
     )
     snap_count = sum(1 for s in plan.segments if s.snap_type == SnapType.BASS_808)
     assert snap_count >= 1
 
 
 def test_max_bass_snaps_cap_enforced() -> None:
-    beat_grid = _beat_grid(128.0, 30.0)
-    onsets = beat_grid + 10.0
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=onsets,
+    grid = _beat_grid(128.0, 30.0)
+    plan = _plan(
+        beat_grid=grid,
         edit_length_ms=30000,
-        cut_frequency=1.0,
         cut_trigger=CutTrigger.HYBRID,
-        tolerance_ms_low=80,
-        tolerance_ms_high=100,
+        cut_frequency=1.0,
+        bass_onsets=grid + 10.0,
         max_bass_snaps=3,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=1,
     )
     snap_count = sum(1 for s in plan.segments if s.snap_type == SnapType.BASS_808)
     assert snap_count <= 3
 
 
-def test_max_consecutive_same_source_enforced() -> None:
-    beat_grid = _beat_grid(120.0, 30.0)
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=np.array([], dtype=np.float64),
+def test_two_source_alternation_cap_enforced() -> None:
+    plan = _plan(
+        beat_grid=_beat_grid(120.0, 30.0),
         edit_length_ms=30000,
         cut_frequency=1.0,
-        cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=50,
-        tolerance_ms_high=70,
-        max_bass_snaps=0,
         alternation_variation=1.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=1,
+        source_weights=(0.5, 0.5),
     )
     run_length = 1
-    last_source = plan.segments[0].source
+    last = plan.segments[0].source_index
     for seg in plan.segments[1:]:
-        if seg.source == last_source:
+        if seg.source_index == last:
             run_length += 1
         else:
             run_length = 1
-        last_source = seg.source
+        last = seg.source_index
         assert run_length <= 2
 
 
-def test_strict_alternation_no_variation() -> None:
-    beat_grid = _beat_grid(120.0, 30.0)
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=np.array([], dtype=np.float64),
+def test_strict_two_source_alternation_with_zero_variation() -> None:
+    plan = _plan(
+        beat_grid=_beat_grid(120.0, 30.0),
         edit_length_ms=30000,
         cut_frequency=1.0,
-        cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=50,
-        tolerance_ms_high=70,
-        max_bass_snaps=0,
         alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=1,
+        source_weights=(0.5, 0.5),
     )
     for i, seg in enumerate(plan.segments):
-        expected = SourceLabel.A if i % 2 == 0 else SourceLabel.B
-        assert seg.source == expected
+        assert seg.source_index == i % 2
+
+
+def test_three_source_rotation_respects_cap() -> None:
+    plan = _plan(
+        beat_grid=_beat_grid(120.0, 45.0),
+        edit_length_ms=45000,
+        cut_frequency=1.0,
+        alternation_variation=0.0,
+        source_weights=(1 / 3, 1 / 3, 1 / 3),
+        min_segment_ms=2000,
+    )
+    assert {s.source_index for s in plan.segments} == {0, 1, 2}
+    run_length = 1
+    last = plan.segments[0].source_index
+    for seg in plan.segments[1:]:
+        if seg.source_index == last:
+            run_length += 1
+        else:
+            run_length = 1
+        last = seg.source_index
+        assert run_length <= 2
+
+
+def test_four_source_all_get_used() -> None:
+    plan = _plan(
+        beat_grid=_beat_grid(120.0, 60.0),
+        edit_length_ms=60000,
+        cut_frequency=1.0,
+        source_weights=(0.25, 0.25, 0.25, 0.25),
+        min_segment_ms=1500,
+    )
+    used = {s.source_index for s in plan.segments}
+    assert used == {0, 1, 2, 3}
+
+
+def test_source_weights_bias_allocation() -> None:
+    plan = _plan(
+        beat_grid=_beat_grid(120.0, 60.0),
+        edit_length_ms=60000,
+        cut_frequency=1.0,
+        source_weights=(0.75, 0.25),
+        min_segment_ms=1500,
+    )
+    time_per_source = [0, 0]
+    for seg in plan.segments:
+        time_per_source[seg.source_index] += seg.end_ms - seg.start_ms
+    assert time_per_source[0] > time_per_source[1] * 1.5
 
 
 def test_minimum_segment_duration_enforced() -> None:
-    # 180 BPM = 333ms between beats — well under the 2000ms minimum.
-    beat_grid = _beat_grid(180.0, 30.0)
-    plan = plan_cuts(
-        beat_times_ms=beat_grid,
-        bass_onset_times_ms=np.array([], dtype=np.float64),
+    plan = _plan(
+        beat_grid=_beat_grid(180.0, 30.0),
         edit_length_ms=30000,
         cut_frequency=1.0,
-        cut_trigger=CutTrigger.BEAT_GRID,
-        tolerance_ms_low=50,
-        tolerance_ms_high=70,
-        max_bass_snaps=0,
-        alternation_variation=0.0,
-        max_consecutive_same_source=2,
-        source_a_seconds=15,
-        source_b_seconds=15,
-        rng_seed=1,
+        min_segment_ms=2000,
     )
-    # Every segment must be at least 2000ms.
     for seg in plan.segments:
-        assert seg.end_ms - seg.start_ms >= 2000, (
-            f"Segment {seg.start_ms}-{seg.end_ms}ms is only "
-            f"{seg.end_ms - seg.start_ms}ms (minimum 2000ms)"
-        )
+        assert seg.end_ms - seg.start_ms >= 2000

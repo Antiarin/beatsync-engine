@@ -1,12 +1,10 @@
 services:
   beatsync:
     build: .
-    image: beatsync
-    container_name: beatsync
+    image: beatsync-engine
+    container_name: beatsync-engine
     volumes:
       - ./media:/app/media
       - ./output:/app/output
-      - ./config.json:/app/config.json:ro
-      - ./config_punch.json:/app/config_punch.json:ro
-      - ./config_breathe.json:/app/config_breathe.json:ro
-    command: ["--config", "config.json"]
+      - ./examples:/app/examples:ro
+    command: ["--config", "examples/drill.json"]

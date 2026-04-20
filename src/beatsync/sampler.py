@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from beatsync.ffprobe import get_duration_seconds
-from beatsync.planner import CutPlan, Segment, SourceLabel
+from beatsync.planner import CutPlan, Segment
 
 
 @dataclass(frozen=True)
@@ -32,39 +33,29 @@ _MIN_ZONE_GAP_S: float = 50.0
 
 def sample_clips(
     plan: CutPlan,
-    source_a_path: Path,
-    source_b_path: Path,
+    sources: Sequence[Path],
     avoid_clip_repeat: bool,
     rng_seed: int | None = None,
 ) -> ClipAssignment:
-    """Sample a clip for each segment from the appropriate source."""
+    """Sample a clip per segment. Each segment draws from its assigned source."""
     rng = random.Random(rng_seed)
-    duration_a = get_duration_seconds(source_a_path)
-    duration_b = get_duration_seconds(source_b_path)
+    durations = [get_duration_seconds(p) for p in sources]
 
-    segs_a = [(i, s) for i, s in enumerate(plan.segments) if s.source == SourceLabel.A]
-    segs_b = [(i, s) for i, s in enumerate(plan.segments) if s.source == SourceLabel.B]
-
-    starts_a = _sample_distributed_starts(duration_a, segs_a, rng, avoid_clip_repeat)
-    starts_b = _sample_distributed_starts(duration_b, segs_b, rng, avoid_clip_repeat)
+    per_source_segs: dict[int, list[tuple[int, Segment]]] = {i: [] for i in range(len(sources))}
+    for i, seg in enumerate(plan.segments):
+        per_source_segs[seg.source_index].append((i, seg))
 
     clips: list[Clip | None] = [None] * len(plan.segments)
-    for (idx, seg), seek_start in zip(segs_a, starts_a, strict=True):
-        duration_s = (seg.end_ms - seg.start_ms) / 1000.0
-        clips[idx] = Clip(
-            source_path=source_a_path,
-            seek_start_s=seek_start,
-            duration_s=duration_s,
-            output_index=idx,
-        )
-    for (idx, seg), seek_start in zip(segs_b, starts_b, strict=True):
-        duration_s = (seg.end_ms - seg.start_ms) / 1000.0
-        clips[idx] = Clip(
-            source_path=source_b_path,
-            seek_start_s=seek_start,
-            duration_s=duration_s,
-            output_index=idx,
-        )
+    for src_idx, indexed in per_source_segs.items():
+        starts = _sample_distributed_starts(durations[src_idx], indexed, rng, avoid_clip_repeat)
+        for (out_idx, seg), seek_start in zip(indexed, starts, strict=True):
+            duration_s = (seg.end_ms - seg.start_ms) / 1000.0
+            clips[out_idx] = Clip(
+                source_path=sources[src_idx],
+                seek_start_s=seek_start,
+                duration_s=duration_s,
+                output_index=out_idx,
+            )
 
     resolved = [c for c in clips if c is not None]
     return ClipAssignment(clips=resolved)

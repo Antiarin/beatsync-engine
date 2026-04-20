@@ -3,19 +3,50 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "beatsync"
-version = "0.1.0"
-description = "Two-source beat-synced video editor (Phase 1)"
+name = "beatsync-engine"
+version = "0.2.0"
+description = "Config-driven beat-synced video editor. BPM detection, N-source alternation, bass-snap cuts, FFmpeg render pipeline, five built-in modes."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Antiarin" }]
+keywords = [
+    "video-editing",
+    "beat-detection",
+    "music-video",
+    "librosa",
+    "ffmpeg",
+    "bpm",
+    "808",
+    "shorts",
+    "reels",
+    "tiktok",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
+    "Typing :: Typed",
+]
 dependencies = [
     "librosa>=0.11.0",
     "scipy>=1.13",
     "numpy>=2.0",
     "soundfile>=0.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Antiarin/beatsync-engine"
+Repository = "https://github.com/Antiarin/beatsync-engine"
+Issues = "https://github.com/Antiarin/beatsync-engine/issues"
+Changelog = "https://github.com/Antiarin/beatsync-engine/releases"
 
 [project.optional-dependencies]
 dev = [

@@ -1,0 +1,28 @@
+{
+  "config_name": "strobe_example",
+  "config_version": "1.0",
+  "mode": "strobe",
+  "sources": [
+    "media/source_1.mp4",
+    "media/source_2.mp4"
+  ],
+  "audio": "media/song.mp3",
+  "cut_frequency": 0.8,
+  "max_consecutive_same_source": 2,
+  "alternation_variation": 0.1,
+  "bpm_override": 0,
+  "bass_hit_amplitude_threshold": 0.7,
+  "clip_selection": "random",
+  "avoid_clip_repeat": true,
+  "long_clip_sampling_strategy": "distributed",
+  "ffmpeg_filter": "eq=saturation=1.1:contrast=1.08",
+  "aspect_ratio": "9:16",
+  "output_resolution": "1080x1920",
+  "output_frame_rate": 30,
+  "output_bitrate": "10M",
+  "render_quality_tier": "draft",
+  "audio_fade_in_duration": 0.1,
+  "audio_fade_out_duration": 0.3,
+  "audio_start_offset": 0,
+  "audio_end_offset": 0
+}

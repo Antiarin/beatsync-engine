@@ -42,13 +42,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /install /usr/local
 
 WORKDIR /app
-COPY config.json ./config.json
+COPY examples/ ./examples/
 
-# Non-root user for safety.
 RUN useradd --create-home --shell /bin/bash beatsync \
     && mkdir -p /app/media /app/output \
     && chown -R beatsync:beatsync /app
 USER beatsync
 
 ENTRYPOINT ["python", "-m", "beatsync"]
-CMD ["--config", "config.json"]
+CMD ["--config", "examples/drill.json"]

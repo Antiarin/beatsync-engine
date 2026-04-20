@@ -9,7 +9,7 @@ from pathlib import Path
 import librosa
 
 from beatsync.audio import analyze_audio, detect_silence_gaps
-from beatsync.config import detect_mode, load_config
+from beatsync.config import load_config
 from beatsync.planner import plan_cuts
 from beatsync.renderer import format_output_filename, render
 from beatsync.sampler import sample_clips
@@ -40,11 +40,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] Config: {e}", file=sys.stderr)
         return 1
 
-    mode = detect_mode(config)
     print(
-        f"[INFO] Mode: {mode.name} ({config.cut_trigger.value}, tolerance "
-        f"{config.tolerance_ms_low}-{config.tolerance_ms_high}ms, "
+        f"[INFO] Mode: {config.mode.value} "
+        f"({config.edit_length_seconds}s, {config.cut_trigger.value}, "
+        f"tolerance {config.tolerance_ms_low}-{config.tolerance_ms_high}ms, "
         f"min_segment {config.min_segment_ms}ms)",
+        file=sys.stderr,
+    )
+    print(
+        f"[INFO] Sources: {len(config.sources)} "
+        f"(weights: {', '.join(f'{w:.2f}' for w in config.source_weights)})",
         file=sys.stderr,
     )
 
@@ -95,8 +100,7 @@ def main(argv: list[str] | None = None) -> int:
         max_bass_snaps=config.max_bass_snaps_per_edit,
         alternation_variation=config.alternation_variation,
         max_consecutive_same_source=config.max_consecutive_same_source,
-        source_a_seconds=config.source_a_seconds,
-        source_b_seconds=config.source_b_seconds,
+        source_weights=config.source_weights,
         min_segment_ms=config.min_segment_ms,
         rng_seed=args.seed,
     )
@@ -104,8 +108,7 @@ def main(argv: list[str] | None = None) -> int:
 
     assignment = sample_clips(
         plan=plan,
-        source_a_path=config.source_a,
-        source_b_path=config.source_b,
+        sources=config.sources,
         avoid_clip_repeat=config.avoid_clip_repeat,
         rng_seed=args.seed,
     )

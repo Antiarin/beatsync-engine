@@ -1,4 +1,4 @@
-"""Cut planning: beat grid -> cut points -> source assignment."""
+"""Cut planning: beat grid, cut points, and N-source assignment."""
 
 from __future__ import annotations
 
@@ -7,13 +7,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 import numpy as np
-
-
-class SourceLabel(StrEnum):
-    """Which source video a segment is assigned to."""
-
-    A = "A"
-    B = "B"
 
 
 class SnapType(StrEnum):
@@ -36,7 +29,7 @@ class Segment:
 
     start_ms: int
     end_ms: int
-    source: SourceLabel
+    source_index: int
     snap_type: SnapType
 
 
@@ -58,12 +51,14 @@ def plan_cuts(
     max_bass_snaps: int,
     alternation_variation: float,
     max_consecutive_same_source: int,
-    source_a_seconds: int,
-    source_b_seconds: int,
+    source_weights: tuple[float, ...],
     min_segment_ms: int = 2000,
     rng_seed: int | None = None,
 ) -> CutPlan:
-    """Generate a CutPlan from the beat grid and bass onsets."""
+    """Generate a CutPlan from the beat grid and bass onsets.
+
+    source_weights must sum to 1.0 and has one entry per source file.
+    """
     rng = random.Random(rng_seed)
     cut_points_ms = _select_cut_points(
         beat_times_ms, edit_length_ms, cut_frequency, rng, min_segment_ms
@@ -83,8 +78,7 @@ def plan_cuts(
         edit_length_ms=edit_length_ms,
         alternation_variation=alternation_variation,
         max_consecutive_same_source=max_consecutive_same_source,
-        source_a_seconds=source_a_seconds,
-        source_b_seconds=source_b_seconds,
+        source_weights=source_weights,
         rng=rng,
     )
     return CutPlan(segments=segments)
@@ -170,58 +164,85 @@ def _apply_808_snaps(
     return deduped, is_snap
 
 
+def _pick_next_source(
+    current: int,
+    used_ms: list[int],
+    target_ms: list[float],
+    consecutive: int,
+    alternation_variation: float,
+    max_consecutive_same_source: int,
+    rng: random.Random,
+) -> int:
+    """Pick the next source index for a segment.
+
+    Honors max_consecutive_same_source, then gives alternation_variation a
+    chance to keep the current source if it is not capped. Otherwise switches
+    to whichever non-current source is most behind its weighted target time.
+    """
+    n = len(used_ms)
+    must_switch = consecutive >= max_consecutive_same_source
+
+    if not must_switch and rng.random() < alternation_variation:
+        return current
+
+    deficits = [target_ms[i] - used_ms[i] for i in range(n)]
+    candidates = [i for i in range(n) if not must_switch or i != current]
+    max_deficit = max(deficits[i] for i in candidates)
+    best = [i for i in candidates if deficits[i] == max_deficit]
+    # Tie-break away from current so equal-deficit runs keep alternating.
+    if current in best and len(best) > 1:
+        best = [i for i in best if i != current]
+    return rng.choice(best) if len(best) > 1 else best[0]
+
+
 def _build_segments(
     cut_points_ms: list[int],
     snap_flags: list[bool],
     edit_length_ms: int,
     alternation_variation: float,
     max_consecutive_same_source: int,
-    source_a_seconds: int,
-    source_b_seconds: int,
+    source_weights: tuple[float, ...],
     rng: random.Random,
 ) -> list[Segment]:
-    """Turn cut points into segments with alternating source assignments."""
+    """Turn cut points into segments with N-source assignments biased by weight."""
     segments: list[Segment] = []
     if len(cut_points_ms) < 2:
         return segments
-    target_a_ms = source_a_seconds * 1000
-    target_b_ms = source_b_seconds * 1000
-    current = SourceLabel.A
+
+    n = len(source_weights)
+    target_ms = [w * edit_length_ms for w in source_weights]
+    used_ms = [0] * n
+    current = 0
     consecutive = 0
-    a_used_ms = 0
-    b_used_ms = 0
+
     for i in range(len(cut_points_ms) - 1):
         start = cut_points_ms[i]
         end = cut_points_ms[i + 1]
-        snap_type = SnapType.BASS_808 if snap_flags[i] else SnapType.BEAT_GRID
         duration = end - start
+        snap_type = SnapType.BASS_808 if snap_flags[i] else SnapType.BEAT_GRID
 
         if i == 0:
             chosen = current
         else:
-            if consecutive >= max_consecutive_same_source:
-                chosen = SourceLabel.B if current == SourceLabel.A else SourceLabel.A
-            else:
-                a_over = a_used_ms - target_a_ms
-                b_over = b_used_ms - target_b_ms
-                if a_over > duration and current == SourceLabel.A:
-                    chosen = SourceLabel.B
-                elif b_over > duration and current == SourceLabel.B:
-                    chosen = SourceLabel.A
-                else:
-                    if rng.random() < alternation_variation:
-                        chosen = current
-                    else:
-                        chosen = SourceLabel.B if current == SourceLabel.A else SourceLabel.A
+            chosen = _pick_next_source(
+                current=current,
+                used_ms=used_ms,
+                target_ms=target_ms,
+                consecutive=consecutive,
+                alternation_variation=alternation_variation,
+                max_consecutive_same_source=max_consecutive_same_source,
+                rng=rng,
+            )
 
-        if chosen == current:
-            consecutive += 1
-        else:
-            consecutive = 1
+        consecutive = consecutive + 1 if chosen == current else 1
         current = chosen
-        if current == SourceLabel.A:
-            a_used_ms += duration
-        else:
-            b_used_ms += duration
-        segments.append(Segment(start_ms=start, end_ms=end, source=current, snap_type=snap_type))
+        used_ms[current] += duration
+        segments.append(
+            Segment(
+                start_ms=start,
+                end_ms=end,
+                source_index=current,
+                snap_type=snap_type,
+            )
+        )
     return segments
